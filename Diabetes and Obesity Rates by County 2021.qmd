@@ -1,0 +1,153 @@
+---
+title: "Diabetes and Obesity Rates by Texas County 2021"
+author: "Kaitlan Wong"
+format: html
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require("knitr")
+library(haven)
+library(dplyr, quietly = T)
+library(tidyverse, quietly = T)
+library(writexl)
+```
+
+##### Load BRFSS data.
+
+```{r}
+
+state_21_working_pudf <- read_sas("~/Every Texan/R/ADA/state_21_working_pudf.sas7bdat", 
+    NULL)
+
+view(state_21_working_pudf)
+```
+
+##### Next, recode diabetes and obesity variables and filter to show the percentage of people that are diabetic and obese by county.
+
+```{r}
+# Recode diabetes and obesity variables
+ brfss_2021 <- state_21_working_pudf %>%
+   mutate(
+     diabetic = recode(diabetes, "1"="Yes", "2"="No"),
+     obese = recode(bmi30, "1"="No", "2"="Yes")
+     ) %>%
+   select(CountyName,  diabetic, obese) 
+ 
+# Group by county and calculate the percentage of people who are diabetic and obese
+diabetic_obese_by_county <- brfss_2021 %>%
+  group_by(CountyName) %>%
+  summarize(
+    across(c(diabetic, obese), ~ mean(. == "Yes"), .names = "{.col}_pct")
+  )
+
+# View the results
+print(diabetic_obese_by_county)
+```
+
+##### Create lists showing the counties with the highest rates.
+
+```{r}
+
+# Group by county and calculate the percentage of people who are diabetic
+diabetic_by_county <- brfss_2021 %>%
+  group_by(CountyName) %>%
+  summarize(diabetic_pct = mean(diabetic == "Yes")) %>%
+  arrange(desc(diabetic_pct))
+
+# View the results
+print(diabetic_by_county)
+
+# Group by county and calculate the percentage of people who are obese
+obese_by_county <- brfss_2021 %>%
+  group_by(CountyName) %>%
+  summarize(obese_pct = mean(obese == "Yes")) %>%
+  arrange(desc(obese_pct))
+
+# View the results
+print(obese_by_county)
+
+```
+
+##### Inspect the new data frame.
+
+```{r}
+
+# View basic summary statistics
+summary(diabetic_obese_by_county)
+
+# View min and max values for each column
+range(diabetic_obese_by_county$diabetic_pct, na.rm = TRUE)
+range(diabetic_obese_by_county$obese_pct, na.rm = TRUE)
+```
+
+##### It looks like there are multiple counties where 100% of surveyed adults are obese or have diabetes. Let's see how many people from each county are in our sample.
+
+```{r}
+
+# Group the data by county and count the number of observations in each group
+n_people <- brfss_2021 %>%
+  group_by(CountyName) %>%
+  summarize(n_people_denominator = n())
+
+# View the results
+print(n_people)
+```
+
+##### We can see why there are so many counties where 100% of surveyed adults are obese -- it's because many counties only had 1 or 2 people surveyed! Let's add the n_people_denominator variable to the diabetic_obese_by_county data frame so these numbers can be referenced in the final data set. 
+
+```{r}
+
+# Join the two data frames by CountyName
+diabetic_obese_by_county <- left_join(diabetic_obese_by_county, n_people, by = "CountyName")
+
+```
+
+##### **Let's also remove all counties with less than 30 people**
+
+```{r}
+# Filter the n_people data frame to only include counties with at least 30 observations
+diabetic_obese_by_county_filtered <- diabetic_obese_by_county %>%
+  filter(n_people_denominator >= 30)
+
+```
+
+##### Check to see which counties have missing values.
+
+```{r}
+
+# Get list of counties with NA percentages for diabetes or obesity
+na_counties <- diabetic_obese_by_county_filtered %>%
+  filter(is.na(diabetic_pct) | is.na(obese_pct)) %>%
+  pull(CountyName)
+
+# Check if any counties have NA percentages
+if (length(na_counties) == 0) {
+  cat("There are no counties with NA percentages.")
+} else {
+  cat("Counties with NA percentages:\n")
+  print(na_counties)
+}
+```
+
+##### Print the counties ordered from highest to lowest diabetes rates.
+
+```{r}
+# Sort the data frame by diabetes rate in descending order
+diabetic_obese_by_county_filtered_sorted <- diabetic_obese_by_county_filtered %>% 
+  arrange(desc(diabetic_pct))
+
+# Print the sorted data frame
+print(diabetic_obese_by_county_filtered_sorted)
+
+
+```
+
+##### Export data into Excel spreadsheet.
+
+```{r}
+
+# Export the data frame to an Excel file
+write_xlsx(diabetic_obese_by_county_filtered_sorted, "diabetes_obesity_by_county_2021_final.xlsx")
+```
